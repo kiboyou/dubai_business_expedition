@@ -39,21 +39,18 @@ import {
   Save,
   RefreshCw,
   Terminal,
-  Copy
+  Copy,
+  MoreHorizontal
 } from 'lucide-react';
 import { Pack, Testimonial, RegistrationFormData, PageView, AgendaDay, Registration } from './types';
 
-// --- SUPABASE CONFIGURATION ---
 
-// 4. Copiez URL et ANON KEY ci-dessous
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string) || '';
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || '';
 
 // Initialisation du client
 const isSupabaseConfigured = SUPABASE_URL;
 const supabase = isSupabaseConfigured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
-
-// --- Data Manager (Wrapper around Supabase) ---
 class DataManager {
   async getRegistrations(): Promise<Registration[]> {
     if (!supabase) return [];
@@ -328,7 +325,8 @@ const content = {
         btnHome: "Retour à l'accueil"
       },
       error: "Erreur lors de la sauvegarde. Veuillez vérifier la connexion ou les droits d'accès.",
-      errorPolicy: "Erreur de permissions (RLS). Veuillez configurer la base de données."
+      errorPolicy: "Erreur de permissions (RLS). Veuillez configurer la base de données.",
+      errorPack: "Veuillez sélectionner un pack pour continuer."
     },
     admin: {
       loading: "Chargement de la base de données...",
@@ -342,7 +340,7 @@ const content = {
       },
       dashboard: {
         title: "Tableau de Bord",
-        subtitle: "Gestion des inscriptions (Supabase)",
+        subtitle: "Gestion des inscriptions",
         registrations: "Inscriptions",
         revenue: "CA Potentiel",
         search: "Rechercher par nom, email, entreprise...",
@@ -591,7 +589,8 @@ const content = {
         btnHome: "Back to Home"
       },
       error: "Error saving data. Please check connection.",
-      errorPolicy: "Permission Error (RLS). Please configure database."
+      errorPolicy: "Permission Error (RLS). Please configure database.",
+      errorPack: "Please select a pack to continue."
     },
     admin: {
       loading: "Loading database...",
@@ -720,9 +719,12 @@ const SectionHeading: React.FC<{
   </div>
 );
 
-const InputGroup: React.FC<{ label: string; error?: string; children: React.ReactNode }> = ({ label, error, children }) => (
+const InputGroup: React.FC<{ label: string; required?: boolean; error?: string; children: React.ReactNode }> = ({ label, required, error, children }) => (
   <div className="space-y-2">
-    <label className="text-sm font-medium text-slate-700">{label}</label>
+    <label className="text-sm font-medium text-slate-700">
+      {label}
+      {required && <span className="ml-1 text-red-500">*</span>}
+    </label>
     {children}
     {error && <p className="text-xs text-red-500">{error}</p>}
   </div>
@@ -961,24 +963,27 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
                {t.admin.dashboard.subtitle}
             </p>
           </div>
-          <div className="flex gap-4">
-             <Button variant="outline" onClick={() => setShowSetup(true)} className="h-12 gap-2 px-4 py-2 text-sm text-blue-700 border-blue-200 bg-blue-50">
+          <div className="flex flex-col w-full gap-4 sm:flex-row md:w-auto">
+             <Button variant="outline" onClick={() => setShowSetup(true)} className="w-full h-12 gap-2 px-4 py-2 text-sm text-blue-700 border-blue-200 bg-blue-50 sm:w-auto">
                 <Database className="w-4 h-4" />
-                Aide Configuration
+                Aide Config
              </Button>
-            <div className="px-6 py-3 text-center bg-white border shadow-sm rounded-xl border-slate-200">
-              <div className="text-xs tracking-wide uppercase text-slate-500">{t.admin.dashboard.registrations}</div>
-              <div className="text-xl font-bold text-slate-900">{registrations.length}</div>
-            </div>
-            <div className="px-6 py-3 text-center bg-white border shadow-sm rounded-xl border-slate-200">
-              <div className="text-xs tracking-wide uppercase text-slate-500">{t.admin.dashboard.revenue}</div>
-              <div className="text-xl font-bold text-green-600">{totalRevenue.toLocaleString()} €</div>
+            <div className="grid w-full grid-cols-2 gap-4 sm:w-auto">
+              <div className="px-6 py-3 text-center bg-white border shadow-sm rounded-xl border-slate-200">
+                <div className="text-xs tracking-wide uppercase text-slate-500">{t.admin.dashboard.registrations}</div>
+                <div className="text-xl font-bold text-slate-900">{registrations.length}</div>
+              </div>
+              <div className="px-6 py-3 text-center bg-white border shadow-sm rounded-xl border-slate-200">
+                <div className="text-xs tracking-wide uppercase text-slate-500">{t.admin.dashboard.revenue}</div>
+                <div className="text-xl font-bold text-green-600">{totalRevenue.toLocaleString()} €</div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200">
-          <div className="flex flex-col items-center justify-between gap-4 p-6 border-b border-slate-200 md:flex-row">
+        <div className="space-y-4">
+          {/* Toolbar */}
+          <div className="flex flex-col items-center justify-between gap-4 p-4 bg-white border shadow-sm rounded-xl border-slate-200 md:flex-row">
             <div className="relative w-full md:w-96">
               <Search className="absolute w-5 h-5 -translate-y-1/2 left-3 top-1/2 text-slate-400" />
               <input 
@@ -989,89 +994,152 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex justify-end w-full gap-2 md:w-auto">
                <Button variant="outline" onClick={refreshData} className="h-10 gap-2 px-4 py-2 text-sm text-primary-700 border-primary-200 bg-primary-50">
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                   {t.admin.dashboard.refresh}
                </Button>
             </div>
           </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.candidate}</th>
-                  <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.company}</th>
-                  <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.pack}</th>
-                  <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.date}</th>
-                  <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.visa}</th>
-                  <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.status}</th>
-                  <th className="px-6 py-4 text-xs font-semibold tracking-wider text-right uppercase text-slate-500">{t.admin.table.actions}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {filteredRegistrations.map((reg) => (
-                  <tr key={reg.id} className="transition hover:bg-slate-50">
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-slate-900">{reg.firstName} {reg.lastName}</div>
-                      <div className="text-sm text-slate-500">{reg.email}</div>
-                      <div className="text-xs text-slate-400">{reg.phone}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-slate-900">{reg.company}</div>
-                      <div className="text-xs text-slate-500">{reg.role}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
-                        ${reg.selectedPack === 'elite' ? 'bg-purple-100 text-purple-800' : 
-                          reg.selectedPack === 'premium' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'}`}>
-                        {reg.selectedPack || 'N/A'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-500">
-                      {new Date(reg.date).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4">
-                      {reg.needsVisa ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">{t.admin.table.visaRequired}</span>
-                      ) : (
-                        <span className="text-xs text-slate-400">-</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                       <select 
-                        value={reg.status}
-                        onChange={(e) => updateStatus(reg.id, e.target.value)}
-                        className={`text-sm rounded border-0 py-1 pl-2 pr-8 font-medium ring-1 ring-inset focus:ring-2 focus:ring-primary-600 cursor-pointer
-                          ${reg.status === 'approved' ? 'bg-green-50 text-green-700 ring-green-600/20' : 
-                            reg.status === 'rejected' ? 'bg-red-50 text-red-700 ring-red-600/20' : 'bg-yellow-50 text-yellow-800 ring-yellow-600/20'}`}
-                       >
-                         <option value="pending">{t.admin.table.statusPending}</option>
-                         <option value="approved">{t.admin.table.statusApproved}</option>
-                         <option value="rejected">{t.admin.table.statusRejected}</option>
-                       </select>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <button 
-                        onClick={() => setDeleteModal({ isOpen: true, id: reg.id })}
-                        className="transition text-slate-400 hover:text-red-600"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {filteredRegistrations.length === 0 && (
+
+          {/* Desktop Table View */}
+          <div className="hidden overflow-hidden bg-white border shadow-sm md:block rounded-xl border-slate-200">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-slate-50">
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
-                      {t.admin.dashboard.noData}
-                    </td>
+                    <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.candidate}</th>
+                    <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.company}</th>
+                    <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.pack}</th>
+                    <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.date}</th>
+                    <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.visa}</th>
+                    <th className="px-6 py-4 text-xs font-semibold tracking-wider text-left uppercase text-slate-500">{t.admin.table.status}</th>
+                    <th className="px-6 py-4 text-xs font-semibold tracking-wider text-right uppercase text-slate-500">{t.admin.table.actions}</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {filteredRegistrations.map((reg) => (
+                    <tr key={reg.id} className="transition hover:bg-slate-50">
+                      <td className="px-6 py-4">
+                        <div className="font-medium text-slate-900">{reg.firstName} {reg.lastName}</div>
+                        <div className="text-sm text-slate-500">{reg.email}</div>
+                        <div className="text-xs text-slate-400">{reg.phone}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm text-slate-900">{reg.company}</div>
+                        <div className="text-xs text-slate-500">{reg.role}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
+                          ${reg.selectedPack === 'elite' ? 'bg-purple-100 text-purple-800' : 
+                            reg.selectedPack === 'premium' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'}`}>
+                          {reg.selectedPack || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-500">
+                        {new Date(reg.date).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4">
+                        {reg.needsVisa ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">{t.admin.table.visaRequired}</span>
+                        ) : (
+                          <span className="text-xs text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                         <select 
+                          value={reg.status}
+                          onChange={(e) => updateStatus(reg.id, e.target.value)}
+                          className={`text-sm rounded border-0 py-1 pl-2 pr-8 font-medium ring-1 ring-inset focus:ring-2 focus:ring-primary-600 cursor-pointer
+                            ${reg.status === 'approved' ? 'bg-green-50 text-green-700 ring-green-600/20' : 
+                              reg.status === 'rejected' ? 'bg-red-50 text-red-700 ring-red-600/20' : 'bg-yellow-50 text-yellow-800 ring-yellow-600/20'}`}
+                         >
+                           <option value="pending">{t.admin.table.statusPending}</option>
+                           <option value="approved">{t.admin.table.statusApproved}</option>
+                           <option value="rejected">{t.admin.table.statusRejected}</option>
+                         </select>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button 
+                          onClick={() => setDeleteModal({ isOpen: true, id: reg.id })}
+                          className="transition text-slate-400 hover:text-red-600"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          {/* Mobile Card View (Responsive) */}
+          <div className="space-y-4 md:hidden">
+            {filteredRegistrations.map((reg) => (
+              <div key={reg.id} className="p-4 bg-white border shadow-sm rounded-xl border-slate-200">
+                <div className="flex items-start justify-between pb-4 mb-4 border-b border-slate-100">
+                  <div>
+                    <h3 className="font-bold text-slate-900">{reg.firstName} {reg.lastName}</h3>
+                    <div className="mt-1 text-xs text-slate-500">{reg.email}</div>
+                  </div>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
+                    ${reg.selectedPack === 'elite' ? 'bg-purple-100 text-purple-800' : 
+                      reg.selectedPack === 'premium' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'}`}>
+                    {reg.selectedPack || 'N/A'}
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <div className="mb-1 text-xs tracking-wide uppercase text-slate-400">{t.admin.table.company}</div>
+                    <div className="text-sm font-medium text-slate-800">{reg.company}</div>
+                    <div className="text-xs text-slate-500">{reg.role}</div>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs tracking-wide uppercase text-slate-400">{t.admin.table.date}</div>
+                    <div className="text-sm font-medium text-slate-800">{new Date(reg.date).toLocaleDateString()}</div>
+                  </div>
+                  {reg.needsVisa && (
+                    <div className="col-span-2">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 w-full justify-center">
+                        {t.admin.table.visaRequired}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-4 pt-4 border-t border-slate-100">
+                   <div className="flex-1">
+                     <select 
+                      value={reg.status}
+                      onChange={(e) => updateStatus(reg.id, e.target.value)}
+                      className={`w-full text-sm rounded border-0 py-2 pl-2 pr-8 font-medium ring-1 ring-inset focus:ring-2 focus:ring-primary-600 cursor-pointer
+                        ${reg.status === 'approved' ? 'bg-green-50 text-green-700 ring-green-600/20' : 
+                          reg.status === 'rejected' ? 'bg-red-50 text-red-700 ring-red-600/20' : 'bg-yellow-50 text-yellow-800 ring-yellow-600/20'}`}
+                     >
+                       <option value="pending">{t.admin.table.statusPending}</option>
+                       <option value="approved">{t.admin.table.statusApproved}</option>
+                       <option value="rejected">{t.admin.table.statusRejected}</option>
+                     </select>
+                   </div>
+                   <button 
+                      onClick={() => setDeleteModal({ isOpen: true, id: reg.id })}
+                      className="p-2 transition rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                   </button>
+                </div>
+              </div>
+            ))}
+            
+            {filteredRegistrations.length === 0 && (
+              <div className="py-12 text-center bg-white border rounded-xl border-slate-200">
+                <p className="text-slate-500">{t.admin.dashboard.noData}</p>
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
     </div>
@@ -1521,8 +1589,16 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (step < 3) {
-      setStep(step + 1);
+    if (step === 1) {
+      setStep(2);
+    } else if (step === 2) {
+      // Validate pack selection
+      if (!formData.selectedPack) {
+        setErrorMessage(t.register.errorPack);
+        setShowErrorModal(true);
+        return;
+      }
+      setStep(3);
     } else {
       // Save data to Supabase
       try {
@@ -1609,7 +1685,7 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
               <div className="space-y-6">
                 <h3 className="mb-6 text-2xl font-bold text-slate-900">{t.register.personalInfo}</h3>
                 <div className="grid gap-6 md:grid-cols-2">
-                  <InputGroup label={t.register.labels.firstName}>
+                  <InputGroup label={t.register.labels.firstName} required>
                     <input 
                       required
                       type="text" 
@@ -1618,7 +1694,7 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
                       onChange={(e) => updateField('firstName', e.target.value)}
                     />
                   </InputGroup>
-                  <InputGroup label={t.register.labels.lastName}>
+                  <InputGroup label={t.register.labels.lastName} required>
                     <input 
                       required
                       type="text" 
@@ -1627,7 +1703,7 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
                       onChange={(e) => updateField('lastName', e.target.value)}
                     />
                   </InputGroup>
-                  <InputGroup label={t.register.labels.email}>
+                  <InputGroup label={t.register.labels.email} required>
                     <input 
                       required
                       type="email" 
@@ -1636,7 +1712,7 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
                       onChange={(e) => updateField('email', e.target.value)}
                     />
                   </InputGroup>
-                  <InputGroup label={t.register.labels.phone}>
+                  <InputGroup label={t.register.labels.phone} required>
                     <input 
                       required
                       type="tel" 
@@ -1647,7 +1723,7 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
                   </InputGroup>
                 </div>
                 <div className="grid gap-6 md:grid-cols-2">
-                   <InputGroup label={t.register.labels.company}>
+                   <InputGroup label={t.register.labels.company} required>
                     <input 
                       required
                       type="text" 
@@ -1656,7 +1732,7 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
                       onChange={(e) => updateField('company', e.target.value)}
                     />
                   </InputGroup>
-                   <InputGroup label={t.register.labels.role}>
+                   <InputGroup label={t.register.labels.role} required>
                     <input 
                       required
                       type="text" 
