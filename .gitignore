@@ -1,8 +1,17 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+node_modules
+dist
+.env
+.vscode
+.DS_Store
+coverage
+.idea
+npm-debug.log
+yarn-error.log
+# Node/# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
-/.pnp
+node_modules
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -14,11 +23,11 @@
 /coverage
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
-/build
+build
 
 # misc
 .DS_Store

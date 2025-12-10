@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Small custom utilities / fallback variables used by the design */
+:root {
+  --primary-600: #ff6b35;
+  --gold-accent: #d4af37;
+  --carbon-black: #07070a;
+}
+
+/* Helpful helper to ensure body background if Tailwind not yet processed */
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  background-color: var(--carbon-black);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Inter', 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial;
+}
