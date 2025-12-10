@@ -1,42 +1,44 @@
+
+import React, { useState, useEffect } from 'react';
 import {
-  AlertTriangle,
   ArrowRight,
-  ArrowUp,
-  Building,
-  Calendar,
-  Check,
   CheckCircle,
+  Crown,
+  Quote,
+  Handshake,
+  TrendingUp,
+  Shield,
+  ShieldCheck,
+  Users,
+  FileSignature,
+  MessageSquare,
+  Calendar,
+  Phone,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Clock,
-  Crown,
-  Database,
-  Download,
-  FileSignature,
   Globe,
-  Handshake,
-  LayoutDashboard,
-  Loader2,
-  Lock,
-  Mail,
-  MapPin,
+  Zap,
   Menu,
-  MessageSquare,
-  Phone,
-  Plane,
-  Quote,
-  Search,
-  Shield,
-  ShieldCheck,
-  Trash2,
-  TrendingUp,
-  Users,
   X,
-  Zap
+  MapPin,
+  Clock,
+  Check,
+  Plane,
+  Building,
+  Mail,
+  ArrowUp,
+  Lock,
+  LayoutDashboard,
+  Search,
+  Download,
+  Trash2,
+  Database,
+  Loader2,
+  AlertTriangle,
+  Save
 } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
-import { AgendaDay, Pack, PageView, Registration, RegistrationFormData, Testimonial } from './types';
+import { Pack, Testimonial, RegistrationFormData, PageView, AgendaDay, Registration } from './types';
 
 // --- SQLite Database Implementation ---
 
@@ -50,6 +52,7 @@ declare global {
 class SqliteManager {
   private db: any = null;
   private dbKey = 'dubai_expedition_sqlite_bin';
+  private dbPath = '/database.sqlite'; // Le fichier physique dans le dossier public
 
   async init() {
     if (this.db) return;
@@ -65,41 +68,62 @@ class SqliteManager {
         locateFile: (file: string) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
       });
 
-      const savedData = localStorage.getItem(this.dbKey);
+      // 1. Priorité : Vérifier le LocalStorage (modifications récentes de l'utilisateur)
+      const localData = localStorage.getItem(this.dbKey);
       
-      if (savedData) {
-        // Load existing DB from local storage (base64 string -> Uint8Array)
-        const binaryString = atob(savedData);
+      if (localData) {
+        console.log("Chargement depuis LocalStorage...");
+        const binaryString = atob(localData);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
         this.db = new SQL.Database(bytes);
       } else {
-        // Create new DB
-        this.db = new SQL.Database();
-        this.run(`
-          CREATE TABLE IF NOT EXISTS registrations (
-            id TEXT PRIMARY KEY,
-            firstName TEXT,
-            lastName TEXT,
-            email TEXT,
-            phone TEXT,
-            company TEXT,
-            role TEXT,
-            selectedPack TEXT,
-            needsVisa INTEGER,
-            message TEXT,
-            date TEXT,
-            status TEXT
-          );
-        `);
-        this.save();
+        // 2. Secondaire : Essayer de charger le fichier physique dans /public/database.sqlite
+        try {
+          console.log("Tentative de chargement du fichier projet...");
+          const response = await fetch(this.dbPath);
+          if (response.ok) {
+            const buffer = await response.arrayBuffer();
+            const u8 = new Uint8Array(buffer);
+            this.db = new SQL.Database(u8);
+            console.log("Base de données chargée depuis le fichier projet.");
+            // On sauvegarde tout de suite en local pour la suite
+            this.save();
+          } else {
+            throw new Error("Fichier non trouvé");
+          }
+        } catch (err) {
+          console.log("Aucun fichier DB trouvé, création d'une nouvelle base.");
+          // 3. Fallback : Créer une nouvelle DB vide
+          this.db = new SQL.Database();
+          this.initTables();
+          this.save();
+        }
       }
-      console.log("SQLite Database Initialized");
     } catch (e) {
       console.error("Failed to init SQLite", e);
     }
+  }
+
+  private initTables() {
+    this.run(`
+      CREATE TABLE IF NOT EXISTS registrations (
+        id TEXT PRIMARY KEY,
+        firstName TEXT,
+        lastName TEXT,
+        email TEXT,
+        phone TEXT,
+        company TEXT,
+        role TEXT,
+        selectedPack TEXT,
+        needsVisa INTEGER,
+        message TEXT,
+        date TEXT,
+        status TEXT
+      );
+    `);
   }
 
   private run(sql: string, params: any[] = []) {
@@ -122,7 +146,23 @@ class SqliteManager {
     localStorage.setItem(this.dbKey, btoa(binary));
   }
 
+  // Permet à l'admin de télécharger le fichier .sqlite pour le mettre dans le projet
+  downloadDbFile() {
+    if (!this.db) return;
+    const data = this.db.export();
+    const blob = new Blob([data], { type: 'application/x-sqlite3' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'database.sqlite';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   addRegistration(data: RegistrationFormData) {
+    // S'assurer que la table existe (au cas où on charge un fichier vide)
+    this.initTables();
+    
     const id = crypto.randomUUID();
     const date = new Date().toISOString();
     const status = 'pending';
@@ -142,6 +182,13 @@ class SqliteManager {
   getRegistrations(): Registration[] {
     if (!this.db) return [];
     try {
+      // Vérification table existe
+      try {
+        this.exec("SELECT count(*) FROM registrations");
+      } catch (e) {
+        this.initTables();
+      }
+
       const result = this.exec("SELECT * FROM registrations ORDER BY date DESC");
       
       if (result.length === 0) return [];
@@ -183,12 +230,96 @@ class SqliteManager {
 
 const dbManager = new SqliteManager();
 
-// --- Translations ---
+// --- Translations & Data ---
 
 type Language = 'fr' | 'en';
 
 const content = {
   fr: {
+    data: {
+      packs: [
+        {
+          variant: 'essentiel',
+          title: 'Découverte',
+          price: '2 500€',
+          priceValue: 2500,
+          description: 'L’essentiel pour comprendre l’écosystème local.',
+          features: [
+            'Accès salon Gulfood',
+            'Networking Event Standard',
+            'Visite guidée Expo City',
+            'Support logistique de base',
+            'Hôtel 4* (4 nuits)'
+          ]
+        },
+        {
+          variant: 'premium',
+          title: 'Business Class',
+          price: '4 500€',
+          priceValue: 4500,
+          description: 'Pour les entrepreneurs prêts à signer des contrats.',
+          features: [
+            'Tout du pack Découverte',
+            'Dîner de Gala Ambassade',
+            '3 RDV B2B qualifiés',
+            'Atelier "Doing Business in Dubai"',
+            'Hôtel 5* (6 nuits)'
+          ]
+        },
+        {
+          variant: 'elite',
+          title: 'Ambassadeur',
+          price: '8 000€',
+          priceValue: 8000,
+          description: 'L’expérience diplomatique ultime pour dirigeants.',
+          features: [
+            'Tout du pack Premium',
+            'Accès Lounge VIP',
+            'Rencontre privée avec l’Ambassadeur',
+            'Chauffeur privé 24/7',
+            'Mise en relation Gouvernementale',
+            'Suite Palace (7 nuits)'
+          ]
+        }
+      ] as Pack[],
+      testimonials: [
+        {
+          name: "Awa Koné",
+          role: "CEO, Tech Africa",
+          image: "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&q=80&w=200",
+          quote: "Cette expédition a complètement transformé ma vision du business à Dubai. L'accès aux réseaux institutionnels via l'Ambassade était inestimable. En 6 jours, j'ai signé plus de partenariats qu'en 6 mois.",
+          stats: { partnerships: 7, roi: "400%", savedMonths: 18 }
+        },
+        {
+          name: "Jean-Marc Diallo",
+          role: "Directeur Export, AgriCorp",
+          image: "https://images.unsplash.com/photo-1506277886164-e25aa3f4ef7f?auto=format&fit=crop&q=80&w=200",
+          quote: "L'organisation était impeccable. Le badge 'Ambassade' ouvre des portes qui restent fermées aux touristes d'affaires classiques. Un investissement rentabilisé dès le 3ème jour.",
+          stats: { partnerships: 4, roi: "250%", savedMonths: 12 }
+        },
+        {
+          name: "Sophie Morel",
+          role: "Fondatrice, Luxe & Mode",
+          image: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&q=80&w=200",
+          quote: "Le niveau des interlocuteurs rencontrés lors du dîner de gala était exceptionnel. J'ai trouvé mon distributeur local grâce à cette mission diplomatique.",
+          stats: { partnerships: 2, roi: "300%", savedMonths: 24 }
+        }
+      ] as Testimonial[],
+      agenda: [
+        { day: "Jour 1", title: "Arrivée & Installation", time: "Toute la journée", description: "Accueil VIP à l'aéroport, transfert en limousine vers l'hôtel. Cocktail de bienvenue sur le rooftop au coucher du soleil.", icon: Plane },
+        { day: "Jour 2", title: "Immersion Écosystème", time: "09:00 - 18:00", description: "Visite du Dubai Multi Commodities Centre (DMCC) et présentation des opportunités fiscales. Déjeuner au Burj Khalifa.", icon: Building },
+        { day: "Jour 3", title: "Business Matching", time: "10:00 - 16:00", description: "Session de rencontres B2B ciblées avec des investisseurs locaux et partenaires potentiels. Soirée libre.", icon: Handshake },
+        { day: "Jour 4", title: "Forum Diplomatique", time: "19:00 - 23:00", description: "Grand Dîner de Gala à la résidence de l'Ambassadeur. Networking de haut niveau avec la diaspora influente.", icon: Crown },
+        { day: "Jour 5", title: "Innovation Tour", time: "09:00 - 15:00", description: "Visite du Musée du Futur et des incubateurs technologiques. Atelier pratique sur l'implantation.", icon: Zap },
+        { day: "Jour 6", title: "Clôture & Détente", time: "10:00 - 22:00", description: "Matinée libre pour shopping ou RDV privés. Safari désert VIP et dîner bédouin de clôture.", icon: Globe },
+      ] as AgendaDay[],
+      faqs: [
+        { q: "Le billet d'avion est-il inclus ?", a: "Non, les vols ne sont pas inclus pour vous laisser le choix de la compagnie et des horaires. Cependant, nous avons des tarifs négociés avec Emirates." },
+        { q: "Ai-je besoin d'un visa ?", a: "Oui, un visa est nécessaire. Notre équipe 'Conciergerie' s'occupe de toutes les démarches administratives pour vous dès votre inscription." },
+        { q: "Puis-je venir avec un associé ?", a: "Absolument. Nous proposons un tarif 'Duo' préférentiel (-15% sur la 2ème personne) si vous partagez la même chambre." },
+        { q: "Quels secteurs d'activité sont concernés ?", a: "L'expédition est multisectorielle, avec un focus particulier sur l'Agro-industrie, la Tech, l'Immobilier et le Luxe/Retail." },
+      ]
+    },
     nav: {
       home: "Accueil",
       agenda: "Programme",
@@ -287,9 +418,11 @@ const content = {
         title: "Candidature Envoyée !",
         message: "Félicitations, votre dossier a bien été enregistré. Notre comité de sélection reviendra vers vous sous 24h avec les instructions de paiement.",
         btnHome: "Retour à l'accueil"
-      }
+      },
+      error: "Erreur lors de la sauvegarde."
     },
     admin: {
+      loading: "Chargement de la base de données...",
       login: {
         title: "Accès Administrateur",
         subtitle: "Veuillez vous identifier pour accéder au tableau de bord.",
@@ -299,12 +432,13 @@ const content = {
       },
       dashboard: {
         title: "Tableau de Bord",
-        subtitle: "Base de données",
+        subtitle: "Gestion des inscriptions",
         registrations: "Inscriptions",
         revenue: "CA Potentiel",
         search: "Rechercher par nom, email, entreprise...",
-        reset: "Réinitialiser DB",
-        export: "Exporter CSV",
+        reset: "Réinitialiser",
+        export: "Export CSV",
+        downloadDb: "Télécharger DB",
         noData: "Aucune inscription trouvée."
       },
       table: {
@@ -369,6 +503,90 @@ const content = {
     }
   },
   en: {
+    data: {
+      packs: [
+        {
+          variant: 'essentiel',
+          title: 'Discovery',
+          price: '2 500€',
+          priceValue: 2500,
+          description: 'Essentials to understand the local ecosystem.',
+          features: [
+            'Gulfood Exhibition Access',
+            'Standard Networking Event',
+            'Expo City Guided Tour',
+            'Basic Logistics Support',
+            '4* Hotel (4 nights)'
+          ]
+        },
+        {
+          variant: 'premium',
+          title: 'Business Class',
+          price: '4 500€',
+          priceValue: 4500,
+          description: 'For entrepreneurs ready to sign contracts.',
+          features: [
+            'All Discovery Pack features',
+            'Embassy Gala Dinner',
+            '3 Qualified B2B Meetings',
+            '"Doing Business in Dubai" Workshop',
+            '5* Hotel (6 nights)'
+          ]
+        },
+        {
+          variant: 'elite',
+          title: 'Ambassador',
+          price: '8 000€',
+          priceValue: 8000,
+          description: 'The ultimate diplomatic experience for executives.',
+          features: [
+            'All Premium Pack features',
+            'VIP Lounge Access',
+            'Private Meeting with the Ambassador',
+            '24/7 Private Chauffeur',
+            'Government Relations Intro',
+            'Palace Suite (7 nights)'
+          ]
+        }
+      ] as Pack[],
+      testimonials: [
+        {
+          name: "Awa Koné",
+          role: "CEO, Tech Africa",
+          image: "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&q=80&w=200",
+          quote: "This expedition completely transformed my vision of business in Dubai. Access to institutional networks via the Embassy was invaluable. In 6 days, I signed more partnerships than in 6 months.",
+          stats: { partnerships: 7, roi: "400%", savedMonths: 18 }
+        },
+        {
+          name: "Jean-Marc Diallo",
+          role: "Export Director, AgriCorp",
+          image: "https://images.unsplash.com/photo-1506277886164-e25aa3f4ef7f?auto=format&fit=crop&q=80&w=200",
+          quote: "The organization was impeccable. The 'Embassy' badge opens doors that remain closed to standard business tourists. An investment made profitable by the 3rd day.",
+          stats: { partnerships: 4, roi: "250%", savedMonths: 12 }
+        },
+        {
+          name: "Sophie Morel",
+          role: "Founder, Luxe & Mode",
+          image: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&q=80&w=200",
+          quote: "The level of interlocutors met during the gala dinner was exceptional. I found my local distributor thanks to this diplomatic mission.",
+          stats: { partnerships: 2, roi: "300%", savedMonths: 24 }
+        }
+      ] as Testimonial[],
+      agenda: [
+        { day: "Day 1", title: "Arrival & Check-in", time: "All Day", description: "VIP Welcome at the airport, limousine transfer to the hotel. Welcome cocktail on the rooftop at sunset.", icon: Plane },
+        { day: "Day 2", title: "Ecosystem Immersion", time: "09:00 - 18:00", description: "Visit to Dubai Multi Commodities Centre (DMCC) and presentation of tax opportunities. Lunch at Burj Khalifa.", icon: Building },
+        { day: "Day 3", title: "Business Matching", time: "10:00 - 16:00", description: "Targeted B2B meeting session with local investors and potential partners. Free evening.", icon: Handshake },
+        { day: "Day 4", title: "Diplomatic Forum", time: "19:00 - 23:00", description: "Grand Gala Dinner at the Ambassador's residence. High-level networking with the influential diaspora.", icon: Crown },
+        { day: "Day 5", title: "Innovation Tour", time: "09:00 - 15:00", description: "Visit to the Museum of the Future and tech incubators. Practical workshop on business setup.", icon: Zap },
+        { day: "Day 6", title: "Closing & Leisure", time: "10:00 - 22:00", description: "Free morning for shopping or private meetings. VIP Desert Safari and closing Bedouin dinner.", icon: Globe },
+      ] as AgendaDay[],
+      faqs: [
+        { q: "Is the flight ticket included?", a: "No, flights are not included to let you choose your airline and schedule. However, we have negotiated rates with Emirates." },
+        { q: "Do I need a visa?", a: "Yes, a visa is required. Our 'Concierge' team handles all administrative procedures for you upon registration." },
+        { q: "Can I come with a partner?", a: "Absolutely. We offer a preferential 'Duo' rate (-15% on the 2nd person) if you share the same room." },
+        { q: "Which business sectors are concerned?", a: "The expedition is multi-sectoral, with a special focus on Agro-industry, Tech, Real Estate, and Luxury/Retail." },
+      ]
+    },
     nav: {
       home: "Home",
       agenda: "Agenda",
@@ -467,9 +685,11 @@ const content = {
         title: "Application Sent!",
         message: "Congratulations, your file has been recorded. Our selection committee will get back to you within 24h with payment instructions.",
         btnHome: "Back to Home"
-      }
+      },
+      error: "Error saving data."
     },
     admin: {
+      loading: "Loading database...",
       login: {
         title: "Administrator Access",
         subtitle: "Please log in to access the dashboard.",
@@ -479,12 +699,13 @@ const content = {
       },
       dashboard: {
         title: "Dashboard",
-        subtitle: "Database",
+        subtitle: "Registration Management",
         registrations: "Registrations",
         revenue: "Potential Revenue",
         search: "Search by name, email, company...",
         reset: "Reset DB",
         export: "Export CSV",
+        downloadDb: "Download DB File",
         noData: "No registrations found."
       },
       table: {
@@ -549,94 +770,6 @@ const content = {
     }
   }
 };
-
-// --- Configuration Data ---
-
-const packsData: Pack[] = [
-  {
-    variant: 'essentiel',
-    title: 'Découverte',
-    price: '2 500€',
-    priceValue: 2500,
-    description: 'L’essentiel pour comprendre l’écosystème local.',
-    features: [
-      'Accès salon Gulfood',
-      'Networking Event Standard',
-      'Visite guidée Expo City',
-      'Support logistique de base',
-      'Hôtel 4* (4 nuits)'
-    ]
-  },
-  {
-    variant: 'premium',
-    title: 'Business Class',
-    price: '4 500€',
-    priceValue: 4500,
-    description: 'Pour les entrepreneurs prêts à signer des contrats.',
-    features: [
-      'Tout du pack Découverte',
-      'Dîner de Gala Ambassade',
-      '3 RDV B2B qualifiés',
-      'Atelier "Doing Business in Dubai"',
-      'Hôtel 5* (6 nuits)'
-    ]
-  },
-  {
-    variant: 'elite',
-    title: 'Ambassadeur',
-    price: '8 000€',
-    priceValue: 8000,
-    description: 'L’expérience diplomatique ultime pour dirigeants.',
-    features: [
-      'Tout du pack Premium',
-      'Accès Lounge VIP',
-      'Rencontre privée avec l’Ambassadeur',
-      'Chauffeur privé 24/7',
-      'Mise en relation Gouvernementale',
-      'Suite Palace (7 nuits)'
-    ]
-  }
-];
-
-const testimonialsData: Testimonial[] = [
-  {
-    name: "Awa Koné",
-    role: "CEO, Tech Africa",
-    image: "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&q=80&w=200",
-    quote: "Cette expédition a complètement transformé ma vision du business à Dubai. L'accès aux réseaux institutionnels via l'Ambassade était inestimable. En 6 jours, j'ai signé plus de partenariats qu'en 6 mois.",
-    stats: { partnerships: 7, roi: "400%", savedMonths: 18 }
-  },
-  {
-    name: "Jean-Marc Diallo",
-    role: "Directeur Export, AgriCorp",
-    image: "https://images.unsplash.com/photo-1506277886164-e25aa3f4ef7f?auto=format&fit=crop&q=80&w=200",
-    quote: "L'organisation était impeccable. Le badge 'Ambassade' ouvre des portes qui restent fermées aux touristes d'affaires classiques. Un investissement rentabilisé dès le 3ème jour.",
-    stats: { partnerships: 4, roi: "250%", savedMonths: 12 }
-  },
-  {
-    name: "Sophie Morel",
-    role: "Fondatrice, Luxe & Mode",
-    image: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&q=80&w=200",
-    quote: "Le niveau des interlocuteurs rencontrés lors du dîner de gala était exceptionnel. J'ai trouvé mon distributeur local grâce à cette mission diplomatique.",
-    stats: { partnerships: 2, roi: "300%", savedMonths: 24 }
-  }
-];
-
-const agendaData: AgendaDay[] = [
-  { day: "Jour 1", title: "Arrivée & Installation", time: "Toute la journée", description: "Accueil VIP à l'aéroport, transfert en limousine vers l'hôtel. Cocktail de bienvenue sur le rooftop au coucher du soleil.", icon: Plane },
-  { day: "Jour 2", title: "Immersion Écosystème", time: "09:00 - 18:00", description: "Visite du Dubai Multi Commodities Centre (DMCC) et présentation des opportunités fiscales. Déjeuner au Burj Khalifa.", icon: Building },
-  { day: "Jour 3", title: "Business Matching", time: "10:00 - 16:00", description: "Session de rencontres B2B ciblées avec des investisseurs locaux et partenaires potentiels. Soirée libre.", icon: Handshake },
-  { day: "Jour 4", title: "Forum Diplomatique", time: "19:00 - 23:00", description: "Grand Dîner de Gala à la résidence de l'Ambassadeur. Networking de haut niveau avec la diaspora influente.", icon: Crown },
-  { day: "Jour 5", title: "Innovation Tour", time: "09:00 - 15:00", description: "Visite du Musée du Futur et des incubateurs technologiques. Atelier pratique sur l'implantation.", icon: Zap },
-  { day: "Jour 6", title: "Clôture & Détente", time: "10:00 - 22:00", description: "Matinée libre pour shopping ou RDV privés. Safari désert VIP et dîner bédouin de clôture.", icon: Globe },
-];
-
-const faqsData = [
-  { q: "Le billet d'avion est-il inclus ?", a: "Non, les vols ne sont pas inclus pour vous laisser le choix de la compagnie et des horaires. Cependant, nous avons des tarifs négociés avec Emirates." },
-  { q: "Ai-je besoin d'un visa ?", a: "Oui, un visa est nécessaire. Notre équipe 'Conciergerie' s'occupe de toutes les démarches administratives pour vous dès votre inscription." },
-  { q: "Puis-je venir avec un associé ?", a: "Absolument. Nous proposons un tarif 'Duo' préférentiel (-15% sur la 2ème personne) si vous partagez la même chambre." },
-  { q: "Quels secteurs d'activité sont concernés ?", a: "L'expédition est multisectorielle, avec un focus particulier sur l'Agro-industrie, la Tech, l'Immobilier et le Luxe/Retail." },
-];
 
 // --- Shared UI Components ---
 
@@ -800,6 +933,10 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
     dbManager.updateStatus(id, status);
     refreshData();
   };
+
+  const downloadDatabase = () => {
+    dbManager.downloadDbFile();
+  };
   
   const filteredRegistrations = registrations.filter(r => 
     (r.lastName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || 
@@ -808,7 +945,7 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
   );
 
   const totalRevenue = filteredRegistrations.reduce((acc, curr) => {
-    const pack = packsData.find(p => p.variant === curr.selectedPack);
+    const pack = t.data.packs.find(p => p.variant === curr.selectedPack);
     return acc + (pack ? pack.priceValue : 0);
   }, 0);
 
@@ -817,7 +954,7 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
         <div className="flex items-center justify-center min-h-screen bg-slate-50">
            <div className="text-center">
               <Loader2 className="w-10 h-10 mx-auto mb-4 text-primary-600 animate-spin" />
-              <p className="text-slate-500">SQLite...</p>
+              <p className="text-slate-500">{t.admin.loading}</p>
            </div>
         </div>
      )
@@ -912,7 +1049,11 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+               <Button variant="outline" onClick={downloadDatabase} className="h-10 gap-2 px-4 py-2 text-sm text-primary-700 border-primary-200 bg-primary-50">
+                  <Save className="w-4 h-4" />
+                  {t.admin.dashboard.downloadDb}
+               </Button>
                <Button variant="danger" onClick={() => setResetModal(true)} className="h-10 gap-2 px-4 py-2 text-sm">
                   <Trash2 className="w-4 h-4" />
                   {t.admin.dashboard.reset}
@@ -1176,7 +1317,7 @@ const HomeView: React.FC<{ onNavigate: (page: PageView) => void, lang: Language 
           />
           
           <div className="grid gap-8 mx-auto lg:grid-cols-3 max-w-7xl">
-            {packsData.map((pack, index) => (
+            {t.data.packs.map((pack, index) => (
               <div key={index} className="relative group perspective-1000">
                 <div className={`relative h-full flex flex-col rounded-2xl border p-8 transition-transform duration-300 group-hover:-translate-y-2 ${
                   pack.variant === 'elite' 
@@ -1235,7 +1376,7 @@ const HomeView: React.FC<{ onNavigate: (page: PageView) => void, lang: Language 
           />
           
           <div className="grid gap-8 md:grid-cols-3">
-            {testimonialsData.map((test, i) => (
+            {t.data.testimonials.map((test, i) => (
               <div key={i} className="relative p-8 transition duration-300 bg-white border border-slate-100 rounded-2xl group hover:shadow-xl">
                 <Quote className="absolute w-12 h-12 transition top-8 right-8 text-slate-100 group-hover:text-primary-100" />
                 <div className="flex items-center gap-4 mb-6">
@@ -1337,7 +1478,7 @@ const AgendaView: React.FC<{ lang: Language }> = ({ lang }) => {
           {/* Ligne verticale */}
           <div className="absolute left-4 md:left-1/2 top-0 bottom-0 w-0.5 bg-slate-200" />
           
-          {agendaData.map((item, index) => (
+          {t.data.agenda.map((item, index) => (
             <div key={index} className={`relative flex flex-col md:flex-row items-center gap-8 mb-16 ${index % 2 === 0 ? 'md:flex-row-reverse' : ''}`}>
               {/* Contenu */}
               <div className="w-full pl-12 md:w-1/2 md:pl-0">
@@ -1390,7 +1531,7 @@ const FAQView: React.FC<{ lang: Language }> = ({ lang }) => {
         />
         
         <div className="space-y-4">
-          {faqsData.map((faq, index) => (
+          {t.data.faqs.map((faq, index) => (
             <div 
               key={index}
               className={`border rounded-2xl overflow-hidden transition-all duration-300 ${
@@ -1459,7 +1600,7 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
         dbManager.addRegistration(formData);
         setShowSuccessModal(true);
       } catch (e) {
-        alert("Erreur lors de la sauvegarde.");
+        alert(t.register.error);
         console.error(e);
       }
     }
@@ -1582,7 +1723,7 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
               <div className="space-y-6">
                 <h3 className="mb-6 text-2xl font-bold text-slate-900">{t.register.programChoice}</h3>
                 <div className="grid gap-4 md:grid-cols-3">
-                  {packsData.map((pack) => (
+                  {t.data.packs.map((pack) => (
                     <div 
                       key={pack.variant}
                       onClick={() => updateField('selectedPack', pack.variant)}
