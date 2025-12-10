@@ -1,5 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import {
   ArrowRight,
   CheckCircle,
@@ -36,199 +36,107 @@ import {
   Database,
   Loader2,
   AlertTriangle,
-  Save
+  Save,
+  RefreshCw,
+  Terminal,
+  Copy
 } from 'lucide-react';
 import { Pack, Testimonial, RegistrationFormData, PageView, AgendaDay, Registration } from './types';
 
-// --- SQLite Database Implementation ---
+// --- SUPABASE CONFIGURATION ---
 
-// Type definition for window.initSqlJs loaded via CDN
-declare global {
-  interface Window {
-    initSqlJs: (config: any) => Promise<any>;
-  }
-}
+// 4. Copiez URL et ANON KEY ci-dessous
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string) || '';
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || '';
 
-class SqliteManager {
-  private db: any = null;
-  private dbKey = 'dubai_expedition_sqlite_bin';
-  private dbPath = '/database.sqlite'; // Le fichier physique dans le dossier public
+// Initialisation du client
+const isSupabaseConfigured = SUPABASE_URL;
+const supabase = isSupabaseConfigured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-  async init() {
-    if (this.db) return;
-
-    try {
-      // Check if sql.js is loaded
-      if (typeof window.initSqlJs !== 'function') {
-        console.warn("sql.js not loaded yet");
-        return;
-      }
-
-      const SQL = await window.initSqlJs({
-        locateFile: (file: string) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
-      });
-
-      // 1. Priorité : Vérifier le LocalStorage (modifications récentes de l'utilisateur)
-      const localData = localStorage.getItem(this.dbKey);
-      
-      if (localData) {
-        console.log("Chargement depuis LocalStorage...");
-        const binaryString = atob(localData);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        this.db = new SQL.Database(bytes);
-      } else {
-        // 2. Secondaire : Essayer de charger le fichier physique dans /public/database.sqlite
-        try {
-          console.log("Tentative de chargement du fichier projet...");
-          const response = await fetch(this.dbPath);
-          if (response.ok) {
-            const buffer = await response.arrayBuffer();
-            const u8 = new Uint8Array(buffer);
-            this.db = new SQL.Database(u8);
-            console.log("Base de données chargée depuis le fichier projet.");
-            // On sauvegarde tout de suite en local pour la suite
-            this.save();
-          } else {
-            throw new Error("Fichier non trouvé");
-          }
-        } catch (err) {
-          console.log("Aucun fichier DB trouvé, création d'une nouvelle base.");
-          // 3. Fallback : Créer une nouvelle DB vide
-          this.db = new SQL.Database();
-          this.initTables();
-          this.save();
-        }
-      }
-    } catch (e) {
-      console.error("Failed to init SQLite", e);
-    }
-  }
-
-  private initTables() {
-    this.run(`
-      CREATE TABLE IF NOT EXISTS registrations (
-        id TEXT PRIMARY KEY,
-        firstName TEXT,
-        lastName TEXT,
-        email TEXT,
-        phone TEXT,
-        company TEXT,
-        role TEXT,
-        selectedPack TEXT,
-        needsVisa INTEGER,
-        message TEXT,
-        date TEXT,
-        status TEXT
-      );
-    `);
-  }
-
-  private run(sql: string, params: any[] = []) {
-    return this.db.run(sql, params);
-  }
-
-  private exec(sql: string) {
-    return this.db.exec(sql);
-  }
-
-  private save() {
-    if (!this.db) return;
-    const data = this.db.export();
-    // Convert Uint8Array to binary string to save in localStorage
-    let binary = '';
-    const len = data.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(data[i]);
-    }
-    localStorage.setItem(this.dbKey, btoa(binary));
-  }
-
-  // Permet à l'admin de télécharger le fichier .sqlite pour le mettre dans le projet
-  downloadDbFile() {
-    if (!this.db) return;
-    const data = this.db.export();
-    const blob = new Blob([data], { type: 'application/x-sqlite3' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'database.sqlite';
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  addRegistration(data: RegistrationFormData) {
-    // S'assurer que la table existe (au cas où on charge un fichier vide)
-    this.initTables();
+// --- Data Manager (Wrapper around Supabase) ---
+class DataManager {
+  async getRegistrations(): Promise<Registration[]> {
+    if (!supabase) return [];
     
-    const id = crypto.randomUUID();
-    const date = new Date().toISOString();
-    const status = 'pending';
-    
-    this.run(`
-      INSERT INTO registrations (id, firstName, lastName, email, phone, company, role, selectedPack, needsVisa, message, date, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      id, data.firstName, data.lastName, data.email, data.phone, data.company, data.role, 
-      data.selectedPack, data.needsVisa ? 1 : 0, data.message, date, status
-    ]);
-    
-    this.save();
-    return id;
-  }
+    const { data, error } = await supabase
+      .from('registrations')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-  getRegistrations(): Registration[] {
-    if (!this.db) return [];
-    try {
-      // Vérification table existe
-      try {
-        this.exec("SELECT count(*) FROM registrations");
-      } catch (e) {
-        this.initTables();
-      }
-
-      const result = this.exec("SELECT * FROM registrations ORDER BY date DESC");
-      
-      if (result.length === 0) return [];
-      
-      const columns = result[0].columns;
-      const values = result[0].values;
-      
-      return values.map((row: any[]) => {
-        const obj: any = {};
-        columns.forEach((col: string, i: number) => {
-          obj[col] = row[i];
-        });
-        // Convert integer back to boolean for needsVisa
-        obj.needsVisa = obj.needsVisa === 1;
-        return obj as Registration;
-      });
-    } catch (e) {
-      console.error("Error fetching registrations", e);
+    if (error) {
+      console.error('Error fetching data:', error);
       return [];
     }
+
+    // Mapping Supabase data to our Registration type
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      email: row.email,
+      phone: row.phone,
+      company: row.company,
+      role: row.role,
+      selectedPack: row.selectedPack,
+      needsVisa: row.needsVisa,
+      message: row.message,
+      status: row.status || 'pending',
+      date: row.created_at // Supabase uses created_at by default
+    }));
   }
 
-  deleteRegistration(id: string) {
-    this.run("DELETE FROM registrations WHERE id = ?", [id]);
-    this.save();
+  async addRegistration(formData: RegistrationFormData): Promise<{success: boolean, error?: any}> {
+    if (!supabase) {
+      console.warn("Supabase not configured. Data not saved.");
+      return { success: true }; // Simulation success
+    }
+
+    const { error } = await supabase
+      .from('registrations')
+      .insert([
+        { 
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          email: formData.email,
+          phone: formData.phone,
+          company: formData.company,
+          role: formData.role,
+          selectedPack: formData.selectedPack,
+          needsVisa: formData.needsVisa,
+          message: formData.message,
+          status: 'pending'
+        }
+      ]);
+
+    if (error) {
+      console.error('Error inserting data:', error);
+      return { success: false, error };
+    }
+    return { success: true };
   }
 
-  updateStatus(id: string, status: string) {
-    this.run("UPDATE registrations SET status = ? WHERE id = ?", [status, id]);
-    this.save();
+  async deleteRegistration(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await supabase.from('registrations').delete().eq('id', id);
+    if (error) {
+      console.error('Error deleting:', error);
+      return false;
+    }
+    return true;
   }
-  
-  resetDatabase() {
-     this.run("DELETE FROM registrations");
-     this.save();
-     window.location.reload();
+
+  async updateStatus(id: string, status: string): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await supabase.from('registrations').update({ status }).eq('id', id);
+    if (error) {
+      console.error('Error updating:', error);
+      return false;
+    }
+    return true;
   }
 }
 
-const dbManager = new SqliteManager();
+const dataManager = new DataManager();
 
 // --- Translations & Data ---
 
@@ -419,10 +327,12 @@ const content = {
         message: "Félicitations, votre dossier a bien été enregistré. Notre comité de sélection reviendra vers vous sous 24h avec les instructions de paiement.",
         btnHome: "Retour à l'accueil"
       },
-      error: "Erreur lors de la sauvegarde."
+      error: "Erreur lors de la sauvegarde. Veuillez vérifier la connexion ou les droits d'accès.",
+      errorPolicy: "Erreur de permissions (RLS). Veuillez configurer la base de données."
     },
     admin: {
       loading: "Chargement de la base de données...",
+      noConfig: "Supabase n'est pas configuré. Veuillez ajouter les clés API dans App.tsx",
       login: {
         title: "Accès Administrateur",
         subtitle: "Veuillez vous identifier pour accéder au tableau de bord.",
@@ -432,13 +342,12 @@ const content = {
       },
       dashboard: {
         title: "Tableau de Bord",
-        subtitle: "Gestion des inscriptions",
+        subtitle: "Gestion des inscriptions (Supabase)",
         registrations: "Inscriptions",
         revenue: "CA Potentiel",
         search: "Rechercher par nom, email, entreprise...",
-        reset: "Réinitialiser",
+        refresh: "Actualiser",
         export: "Export CSV",
-        downloadDb: "Télécharger DB",
         noData: "Aucune inscription trouvée."
       },
       table: {
@@ -459,11 +368,6 @@ const content = {
         message: "Êtes-vous sûr de vouloir supprimer définitivement cette inscription ? Cette action est irréversible.",
         cancel: "Annuler",
         confirm: "Supprimer"
-      },
-      resetModal: {
-         title: "Réinitialisation Complète",
-         message: "Attention : Vous allez effacer TOUTES les données de la base. Voulez-vous continuer ?",
-         confirm: "Tout effacer"
       }
     },
     footer: {
@@ -686,10 +590,12 @@ const content = {
         message: "Congratulations, your file has been recorded. Our selection committee will get back to you within 24h with payment instructions.",
         btnHome: "Back to Home"
       },
-      error: "Error saving data."
+      error: "Error saving data. Please check connection.",
+      errorPolicy: "Permission Error (RLS). Please configure database."
     },
     admin: {
       loading: "Loading database...",
+      noConfig: "Supabase not configured. Please add API keys in App.tsx",
       login: {
         title: "Administrator Access",
         subtitle: "Please log in to access the dashboard.",
@@ -699,13 +605,12 @@ const content = {
       },
       dashboard: {
         title: "Dashboard",
-        subtitle: "Registration Management",
+        subtitle: "Registration Management (Supabase)",
         registrations: "Registrations",
         revenue: "Potential Revenue",
         search: "Search by name, email, company...",
-        reset: "Reset DB",
+        refresh: "Refresh",
         export: "Export CSV",
-        downloadDb: "Download DB File",
         noData: "No registrations found."
       },
       table: {
@@ -726,11 +631,6 @@ const content = {
         message: "Are you sure you want to permanently delete this registration? This action cannot be undone.",
         cancel: "Cancel",
         confirm: "Delete"
-      },
-      resetModal: {
-         title: "Full Reset",
-         message: "Warning: You are about to wipe ALL data from the database. Do you want to continue?",
-         confirm: "Wipe Everything"
       }
     },
     footer: {
@@ -836,26 +736,33 @@ const Modal: React.FC<{
   confirmText?: string;
   cancelText?: string;
   onConfirm?: () => void;
-  type?: 'success' | 'danger';
-}> = ({ isOpen, onClose, title, message, confirmText, cancelText, onConfirm, type = 'success' }) => {
+  type?: 'success' | 'danger' | 'info';
+  children?: React.ReactNode;
+}> = ({ isOpen, onClose, title, message, confirmText, cancelText, onConfirm, type = 'success', children }) => {
   if (!isOpen) return null;
+
+  const bgColors = {
+    success: 'bg-green-100 text-green-600',
+    danger: 'bg-red-100 text-red-600',
+    info: 'bg-blue-100 text-blue-600'
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md p-8 bg-white shadow-2xl rounded-2xl animate-fade-in-up">
-        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 ${
-          type === 'success' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-        }`}>
-          {type === 'success' ? <Check className="w-8 h-8" /> : <AlertTriangle className="w-8 h-8" />}
+      <div className="relative bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full animate-fade-in-up max-h-[90vh] overflow-y-auto">
+        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 ${bgColors[type]}`}>
+          {type === 'success' ? <Check className="w-8 h-8" /> : type === 'danger' ? <AlertTriangle className="w-8 h-8" /> : <Terminal className="w-8 h-8" />}
         </div>
         
         <h3 className="mb-4 text-2xl font-bold text-center text-slate-900">{title}</h3>
         <p className="mb-8 leading-relaxed text-center text-slate-600">
           {message}
         </p>
+
+        {children}
         
-        <div className="flex justify-center gap-4">
+        <div className="flex justify-center gap-4 mt-6">
           {cancelText && (
             <Button variant="secondary" onClick={onClose} className="w-full">
               {cancelText}
@@ -863,7 +770,7 @@ const Modal: React.FC<{
           )}
           {confirmText && onConfirm && (
             <Button 
-              variant={type === 'success' ? 'primary' : 'danger'} 
+              variant={type === 'success' ? 'primary' : type === 'danger' ? 'danger' : 'primary'} 
               onClick={onConfirm} 
               className="w-full"
             >
@@ -876,6 +783,61 @@ const Modal: React.FC<{
   );
 };
 
+const SetupGuideModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
+  const sqlCode = `-- Création de la table (si elle n'existe pas)
+create table if not exists registrations (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  "firstName" text,
+  "lastName" text,
+  email text,
+  phone text,
+  company text,
+  role text,
+  "selectedPack" text,
+  "needsVisa" boolean,
+  message text,
+  status text default 'pending'
+);
+
+-- Activation de la sécurité
+alter table registrations enable row level security;
+
+-- Création d'une politique permissive pour le site public
+-- ATTENTION : Ceci rend la table lisible et modifiable par tous (pour cet MVP)
+create policy "Enable access for all users" on registrations
+for all
+using (true)
+with check (true);`;
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(sqlCode);
+    alert("Code copié !");
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Configuration Base de Données"
+      message="Copiez le code SQL ci-dessous et exécutez-le dans le 'SQL Editor' de votre tableau de bord Supabase pour corriger l'erreur de permissions (RLS)."
+      type="info"
+      cancelText="Fermer"
+    >
+      <div className="relative p-4 overflow-x-auto font-mono text-sm rounded-lg bg-slate-900 text-slate-300">
+        <button 
+          onClick={copyToClipboard}
+          className="absolute p-2 text-white transition rounded top-2 right-2 bg-slate-800 hover:bg-slate-700"
+          title="Copier"
+        >
+          <Copy className="w-4 h-4" />
+        </button>
+        <pre className="whitespace-pre-wrap">{sqlCode}</pre>
+      </div>
+    </Modal>
+  );
+};
+
 // --- Page Components ---
 
 const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
@@ -884,18 +846,11 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
   const [password, setPassword] = useState('');
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   
   // Modals state
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean, id: string | null }>({ isOpen: false, id: null });
-  const [resetModal, setResetModal] = useState(false);
-
-  useEffect(() => {
-    // Attempt to init DB if not ready
-    dbManager.init().then(() => {
-      setLoading(false);
-    });
-  }, []);
+  const [showSetup, setShowSetup] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -903,8 +858,11 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
     }
   }, [isAuthenticated]);
 
-  const refreshData = () => {
-    setRegistrations(dbManager.getRegistrations());
+  const refreshData = async () => {
+    setLoading(true);
+    const data = await dataManager.getRegistrations();
+    setRegistrations(data);
+    setLoading(false);
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -916,26 +874,17 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
     }
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (deleteModal.id) {
-      dbManager.deleteRegistration(deleteModal.id);
+      await dataManager.deleteRegistration(deleteModal.id);
       refreshData();
       setDeleteModal({ isOpen: false, id: null });
     }
   };
 
-  const confirmReset = () => {
-    dbManager.resetDatabase();
-    setResetModal(false);
-  };
-
-  const updateStatus = (id: string, status: string) => {
-    dbManager.updateStatus(id, status);
+  const updateStatus = async (id: string, status: string) => {
+    await dataManager.updateStatus(id, status);
     refreshData();
-  };
-
-  const downloadDatabase = () => {
-    dbManager.downloadDbFile();
   };
   
   const filteredRegistrations = registrations.filter(r => 
@@ -948,17 +897,6 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
     const pack = t.data.packs.find(p => p.variant === curr.selectedPack);
     return acc + (pack ? pack.priceValue : 0);
   }, 0);
-
-  if (loading) {
-     return (
-        <div className="flex items-center justify-center min-h-screen bg-slate-50">
-           <div className="text-center">
-              <Loader2 className="w-10 h-10 mx-auto mb-4 text-primary-600 animate-spin" />
-              <p className="text-slate-500">{t.admin.loading}</p>
-           </div>
-        </div>
-     )
-  }
 
   if (!isAuthenticated) {
     return (
@@ -1003,16 +941,14 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
           type="danger"
         />
 
-        <Modal 
-          isOpen={resetModal} 
-          onClose={() => setResetModal(false)}
-          title={t.admin.resetModal.title}
-          message={t.admin.resetModal.message}
-          confirmText={t.admin.resetModal.confirm}
-          cancelText={t.admin.deleteModal.cancel}
-          onConfirm={confirmReset}
-          type="danger"
-        />
+        <SetupGuideModal isOpen={showSetup} onClose={() => setShowSetup(false)} />
+
+        {!isSupabaseConfigured && (
+           <div className="flex items-center gap-3 p-4 mb-8 text-yellow-800 border border-yellow-200 bg-yellow-50 rounded-xl">
+              <AlertTriangle className="w-6 h-6" />
+              <p className="font-semibold">{t.admin.noConfig}</p>
+           </div>
+        )}
 
         <div className="flex flex-col items-start justify-between gap-4 mb-8 md:flex-row md:items-center">
           <div>
@@ -1026,6 +962,10 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
             </p>
           </div>
           <div className="flex gap-4">
+             <Button variant="outline" onClick={() => setShowSetup(true)} className="h-12 gap-2 px-4 py-2 text-sm text-blue-700 border-blue-200 bg-blue-50">
+                <Database className="w-4 h-4" />
+                Aide Configuration
+             </Button>
             <div className="px-6 py-3 text-center bg-white border shadow-sm rounded-xl border-slate-200">
               <div className="text-xs tracking-wide uppercase text-slate-500">{t.admin.dashboard.registrations}</div>
               <div className="text-xl font-bold text-slate-900">{registrations.length}</div>
@@ -1050,17 +990,9 @@ const AdminView: React.FC<{ lang: Language }> = ({ lang }) => {
               />
             </div>
             <div className="flex flex-wrap gap-2">
-               <Button variant="outline" onClick={downloadDatabase} className="h-10 gap-2 px-4 py-2 text-sm text-primary-700 border-primary-200 bg-primary-50">
-                  <Save className="w-4 h-4" />
-                  {t.admin.dashboard.downloadDb}
-               </Button>
-               <Button variant="danger" onClick={() => setResetModal(true)} className="h-10 gap-2 px-4 py-2 text-sm">
-                  <Trash2 className="w-4 h-4" />
-                  {t.admin.dashboard.reset}
-               </Button>
-               <Button variant="outline" className="h-10 gap-2 px-4 py-2 text-sm">
-                  <Download className="w-4 h-4" />
-                  {t.admin.dashboard.export}
+               <Button variant="outline" onClick={refreshData} className="h-10 gap-2 px-4 py-2 text-sm text-primary-700 border-primary-200 bg-primary-50">
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  {t.admin.dashboard.refresh}
                </Button>
             </div>
           </div>
@@ -1580,27 +1512,35 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
   const t = content[lang];
   const [step, setStep] = useState(1);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [formData, setFormData] = useState<RegistrationFormData>({
     firstName: '', lastName: '', email: '', phone: '', company: '', role: '',
     selectedPack: (initialPack as any) || null, needsVisa: true, message: ''
   });
 
-  useEffect(() => {
-     // Init DB on load to ensure it's ready when submitting
-     dbManager.init();
-  }, []);
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (step < 3) {
       setStep(step + 1);
     } else {
-      // Save data to SQLite DB
+      // Save data to Supabase
       try {
-        dbManager.addRegistration(formData);
-        setShowSuccessModal(true);
+        const result = await dataManager.addRegistration(formData);
+        if (result.success) {
+          setShowSuccessModal(true);
+        } else {
+          // Handle Supabase errors
+          if (result.error?.code === '42501') {
+             setErrorMessage(t.register.errorPolicy);
+          } else {
+             setErrorMessage(t.register.error);
+          }
+          setShowErrorModal(true);
+        }
       } catch (e) {
-        alert(t.register.error);
+        setErrorMessage(t.register.error);
+        setShowErrorModal(true);
         console.error(e);
       }
     }
@@ -1620,6 +1560,16 @@ const RegisterView: React.FC<{ initialPack?: string | null, lang: Language, onHo
         confirmText={t.register.successModal.btnHome}
         onConfirm={onHome}
         type="success"
+      />
+      
+      <Modal 
+        isOpen={showErrorModal}
+        onClose={() => setShowErrorModal(false)}
+        title="Erreur"
+        message={errorMessage}
+        type="danger"
+        confirmText="Fermer"
+        onConfirm={() => setShowErrorModal(false)}
       />
 
       <div className="container max-w-4xl px-4 mx-auto">
@@ -1934,7 +1884,7 @@ const App: React.FC = () => {
         {currentView === 'home' && <HomeView onNavigate={navigateTo} lang={lang} />}
         {currentView === 'agenda' && <AgendaView lang={lang} />}
         {currentView === 'faq' && <FAQView lang={lang} />}
-        {currentView === 'register' && <RegisterView lang={lang} onHome={() => navigateTo('home')} />}
+        {currentView === 'register' && <RegisterView lang={lang} onHome={() => navigateTo('home')} initialPack={null} />}
         {currentView === 'admin' && <AdminView lang={lang} />}
         {currentView === 'legal' && <LegalPage title={t.legal.legalNotice} sections={t.legalContent.legal} date={t.legal.lastUpdated} />}
         {currentView === 'privacy' && <LegalPage title={t.legal.privacyPolicy} sections={t.legalContent.privacy} date={t.legal.lastUpdated} />}
